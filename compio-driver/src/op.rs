@@ -9,12 +9,12 @@ use std::{io, marker::PhantomPinned, mem::ManuallyDrop, net::Shutdown};
 use compio_buf::{BufResult, IntoInner, IoBuf, IoBufMut, SetBufInit};
 use socket2::SockAddr;
 
-#[cfg(windows)]
-pub use crate::sys::op::{ConnectNamedPipe, DeviceIoControl};
 pub use crate::sys::op::{
     Accept, Recv, RecvFrom, RecvFromVectored, RecvMsg, RecvVectored, Send, SendMsg, SendTo,
     SendToVectored, SendVectored,
 };
+#[cfg(windows)]
+pub use crate::sys::op::{ConnectNamedPipe, DeviceIoControl};
 #[cfg(unix)]
 pub use crate::sys::op::{
     CreateDir, CreateSocket, FileStat, HardLink, Interest, OpenFile, PathStat, PollOnce,
@@ -161,6 +161,8 @@ impl CloseFile {
 }
 
 /// Read a file at specified position into specified buffer.
+///
+/// 在指定的偏移位置开始执行读取，并将内容存入缓冲区中。
 #[derive(Debug)]
 pub struct ReadAt<T: IoBufMut, S> {
     pub(crate) fd: S,

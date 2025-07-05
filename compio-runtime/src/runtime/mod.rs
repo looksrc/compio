@@ -1,3 +1,8 @@
+//！scoped_tls域化的线程本地存储
+//！- set：暂以临时值执行动作，过后恢复原值。流程：
+//！- 备份原值->设置临时值->执行动作->恢复原值。(这叫啥模式呢?)。
+//！- with：以当前值执行动作。
+
 use std::{
     any::Any,
     cell::{Cell, RefCell},
@@ -39,10 +44,23 @@ scoped_tls::scoped_thread_local!(static CURRENT_RUNTIME: Runtime);
 
 /// Type alias for `Task<Result<T, Box<dyn Any + Send>>>`, which resolves to an
 /// `Err` when the spawned future panicked.
+///
+/// 任务等待者，等价于`Task<Result<T, Box<dyn Any + Send>>>`。
 pub type JoinHandle<T> = Task<Result<T, Box<dyn Any + Send>>>;
 
+/// 任务执行队列。包含本地队列和同步队列。
+///
+/// 插入时机：
+/// - 本地队列有效的情况下，会将任务插本地队列。
+/// - 本地队列无效的情况下，会将任务插同步队列。
+///
+/// 本地队列有效性：
+/// - 本地队列被移出线程了，被调用是不在自己的线程了，就会失效。
+/// - 问题：什么业务场景会导致它失效呢？
 struct RunnableQueue {
+    /// 本地队列，移动到其它线程会失效。
     local_runnables: SendWrapper<RefCell<VecDeque<Runnable>>>,
+    /// 同步队列。多生产者、多消费者、无界。
     sync_runnables: SegQueue<Runnable>,
 }
 
@@ -54,6 +72,9 @@ impl RunnableQueue {
         }
     }
 
+    /// 任务调度
+    /// - 如果有本地队列，则追加到本地队列尾部。
+    /// - 否则，将任务追加到同步队列尾部。并通知谁???
     pub fn schedule(&self, runnable: Runnable, handle: &NotifyHandle) {
         if let Some(runnables) = self.local_runnables.get() {
             runnables.borrow_mut().push_back(runnable);
@@ -65,16 +86,23 @@ impl RunnableQueue {
         }
     }
 
+    /// 执行几轮任务
+    /// - 轮次上限：event_interval。
+    /// - 每轮流程：本地队列执行一个，同步队列执行一个。两队列都为空则终止。
+    /// - 返回标志：如果仍有参与任务则返回true。即本地对队列或同步队列不全为空。
+    ///
     /// SAFETY: call in the main thread
     pub unsafe fn run(&self, event_interval: usize) -> bool {
         let local_runnables = self.local_runnables.get_unchecked();
         for _i in 0..event_interval {
+            // 从本地队列弹出一个任务并执行。
             let next_task = local_runnables.borrow_mut().pop_front();
             let has_local_task = next_task.is_some();
             if let Some(task) = next_task {
                 task.run();
             }
             // Cheaper than pop.
+            // 从同步队列弹出一个任务并执行。
             let has_sync_task = !self.sync_runnables.is_empty();
             if has_sync_task {
                 if let Some(task) = self.sync_runnables.pop() {
@@ -83,7 +111,10 @@ impl RunnableQueue {
             } else if !has_local_task {
                 break;
             }
+            // 本地队列和同步队列都为空，则终止遍历。
         }
+
+        // 遍历完成后，判断是否本地和同步队列是否还有待执行任务，如果有则返回true。
         !(local_runnables.borrow_mut().is_empty() && self.sync_runnables.is_empty())
     }
 }
@@ -94,11 +125,15 @@ thread_local! {
 
 /// The async runtime of compio. It is a thread local runtime, and cannot be
 /// sent to other threads.
+///
+/// compio的异步运行时，只能在线程内使用，不能穿越线程。
 pub struct Runtime {
     driver: RefCell<Proactor>,
     runnables: Arc<RunnableQueue>,
     #[cfg(feature = "time")]
     timer_runtime: RefCell<TimerRuntime>,
+    /// 每波执行任务的轮次上限。由于每轮次都会查看本地和同步2个队列，
+    /// 所以最多会执行2* event_interval个任务。
     event_interval: usize,
     // Runtime id is used to check if the buffer pool is belonged to this runtime or not.
     // Without this, if user enable `io-uring-buf-ring` feature then:
@@ -115,15 +150,20 @@ pub struct Runtime {
 
 impl Runtime {
     /// Create [`Runtime`] with default config.
+    ///
+    /// 创建一个运行时[`Runtime`]实例，使用默认配置。
     pub fn new() -> io::Result<Self> {
         Self::builder().build()
     }
 
     /// Create a builder for [`Runtime`].
+    ///
+    /// 创建一个运行时[`Runtime`]构建器[`RuntimeBuilder`]。
     pub fn builder() -> RuntimeBuilder {
         RuntimeBuilder::new()
     }
 
+    /// 使用已有的构建器实例[`RuntimeBuilder`]，创建一个运行时实例[`Runtime`]。
     fn with_builder(builder: &RuntimeBuilder) -> io::Result<Self> {
         let id = RUNTIME_ID.get();
         RUNTIME_ID.set(id + 1);
@@ -140,6 +180,8 @@ impl Runtime {
 
     /// Try to perform a function on the current runtime, and if no runtime is
     /// running, return the function back.
+    ///
+    /// 以当前线程绑定的运行时执行函数。如果没绑定运行时则返回错误。
     pub fn try_with_current<T, F: FnOnce(&Self) -> T>(f: F) -> Result<T, F> {
         if CURRENT_RUNTIME.is_set() {
             Ok(CURRENT_RUNTIME.with(f))
@@ -149,6 +191,8 @@ impl Runtime {
     }
 
     /// Perform a function on the current runtime.
+    ///
+    /// 以当前线程绑定的运行时执行函数。如果没绑定运行时则触发恐慌。
     ///
     /// ## Panics
     ///
@@ -168,11 +212,17 @@ impl Runtime {
 
     /// Set this runtime as current runtime, and perform a function in the
     /// current scope.
+    ///
+    /// 以本运行时执行执行动作。
     pub fn enter<T, F: FnOnce() -> T>(&self, f: F) -> T {
         CURRENT_RUNTIME.set(self, f)
     }
 
     /// Spawns a new asynchronous task, returning a [`Task`] for it.
+    ///
+    /// 孵化一个异步任务，
+    /// - 任务的执行句柄被调度入队列[`Runnable`]，并触发通知。
+    /// - 返回任务的等待句柄[`Task`]。
     ///
     /// # Safety
     ///
@@ -190,6 +240,8 @@ impl Runtime {
 
     /// Low level API to control the runtime.
     ///
+    /// 激发当前运行时执行一波任务。
+    ///
     /// Run the scheduled tasks.
     ///
     /// The return value indicates whether there are still tasks in the queue.
@@ -199,6 +251,17 @@ impl Runtime {
     }
 
     /// Block on the future till it completes.
+    ///
+    /// 阻塞当前线程，直到传入的future在本运行时中执行完成。
+    /// - 1.将根future稍作包装，使之可以传出执行结果。
+    /// - 2.将根future包装体，孵化为异步任务，并丢掉等待者(detach)。
+    /// - 3.死循环：
+    ///   - 激发运行时执行一波异步任务。
+    ///   - 根据传出result，判断根future是否执行完毕了，如果是则直接中断返回了。
+    ///   - 否则，驱动一次IO
+    ///     - 如果任务队列未空，则驱动超时时间设为0，因为还有任务等着执行呢。
+    ///     - 否则，以当前超时时间驱动一次IO。
+    ///   - 下一次循环...
     pub fn block_on<F: Future>(&self, future: F) -> F::Output {
         CURRENT_RUNTIME.set(self, || {
             let mut result = None;
@@ -219,6 +282,8 @@ impl Runtime {
 
     /// Spawns a new asynchronous task, returning a [`Task`] for it.
     ///
+    /// 孵化一个异步任务，返回等待者句柄[`Task`]。
+    ///
     /// Spawning a task enables the task to execute concurrently to other tasks.
     /// There is no guarantee that a spawned task will execute to completion.
     pub fn spawn<F: Future + 'static>(&self, future: F) -> JoinHandle<F::Output> {
@@ -226,6 +291,8 @@ impl Runtime {
     }
 
     /// Spawns a blocking task in a new thread, and wait for it.
+    ///
+    /// 异步化一个阻塞任务，孵化到新的线程中执行，返回等待者句柄。
     ///
     /// The task will not be cancelled even if the future is dropped.
     pub fn spawn_blocking<T: Send + 'static>(
@@ -531,7 +598,7 @@ pub async fn submit<T: OpCode + 'static>(op: T) -> BufResult<usize, T> {
 /// This method doesn't create runtime. It tries to obtain the current runtime
 /// by [`Runtime::with_current`].
 pub async fn submit_with_flags<T: OpCode + 'static>(op: T) -> (BufResult<usize, T>, u32) {
-    let state = Runtime::with_current(|r| r.submit_raw(op));
+    let state: PushEntry<Key<T>, BufResult<usize, T>> = Runtime::with_current(|r| r.submit_raw(op));
     match state {
         PushEntry::Pending(user_data) => OpFuture::new(user_data).await,
         PushEntry::Ready(res) => {

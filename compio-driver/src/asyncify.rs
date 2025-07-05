@@ -78,6 +78,8 @@ fn worker(
 }
 
 /// A thread pool to perform blocking operations in other threads.
+///
+/// 用于执行阻塞操作的线程池。
 #[derive(Debug, Clone)]
 pub struct AsyncifyPool {
     sender: Sender<BoxedDispatchable>,

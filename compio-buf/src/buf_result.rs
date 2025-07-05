@@ -9,25 +9,36 @@ use crate::IntoInner;
 
 /// A specialized `Result` type for operations with buffers.
 ///
+/// 这是一个特殊的`Result`类型，用于需要缓冲区的操作。
+///
 /// This type is used as a return value for asynchronous compio methods that
 /// require passing ownership of a buffer to the runtime. When the operation
 /// completes, the buffer is returned no matter if the operation completed
 /// successfully.
+///
+/// 此类型用于需要向运行时移交缓冲区所有权的异步方法的返回值。
+/// 当操作完成后，此缓存无论操作是否成功，都会被返回出来。
 #[must_use]
 pub struct BufResult<T, B>(pub io::Result<T>, pub B);
 
 impl<T, B> BufResult<T, B> {
     /// Returns [`true`] if the result is [`Ok`].
+    ///
+    /// 判定操作是否执行成功。
     pub const fn is_ok(&self) -> bool {
         self.0.is_ok()
     }
 
     /// Returns [`true`] if the result is [`Err`].
+    ///
+    /// 判定操作是否执行失败。
     pub const fn is_err(&self) -> bool {
         self.0.is_err()
     }
 
     /// Maps the result part, and allows updating the buffer.
+    ///
+    /// 同时转换Result和Buffer两个字段。
     #[inline]
     pub fn map<U>(self, f: impl FnOnce(T, B) -> (U, B)) -> BufResult<U, B> {
         match self.0 {
@@ -40,6 +51,10 @@ impl<T, B> BufResult<T, B> {
     }
 
     /// Maps the result part, and allows changing the buffer type.
+    ///
+    /// 依据Result的值执行对应的转换。
+    /// - 如果Ok，则同map。
+    /// - 如果Err，则只转换Buffer字段。透传Err值。
     #[inline]
     pub fn map2<U, C>(
         self,
@@ -56,18 +71,24 @@ impl<T, B> BufResult<T, B> {
     }
 
     /// Maps the result part, and keeps the buffer unchanged.
+    ///
+    /// 只转换Result字段，透传Buffer字段。
     #[inline]
     pub fn map_res<U>(self, f: impl FnOnce(T) -> U) -> BufResult<U, B> {
         BufResult(self.0.map(f), self.1)
     }
 
     /// Maps the buffer part, and keeps the result unchanged.
+    ///
+    /// 只转换Buffer字段，透传Result字段。
     #[inline]
     pub fn map_buffer<C>(self, f: impl FnOnce(B) -> C) -> BufResult<T, C> {
         BufResult(self.0, f(self.1))
     }
 
     /// Updating the result type and modifying the buffer.
+    ///
+    /// 如果Result为Ok，则转换Result类型并修改Buffer内容。
     #[inline]
     pub fn and_then<U>(self, f: impl FnOnce(T, B) -> (io::Result<U>, B)) -> BufResult<U, B> {
         match self.0 {
@@ -77,6 +98,8 @@ impl<T, B> BufResult<T, B> {
     }
 
     /// Returns the contained [`Ok`] value, consuming the `self` value.
+    ///
+    /// 解包Result字段的Ok值，同时取出Buffer。自定义恐慌消息。
     #[inline]
     #[track_caller]
     pub fn expect(self, msg: &str) -> (T, B) {
@@ -84,6 +107,8 @@ impl<T, B> BufResult<T, B> {
     }
 
     /// Returns the contained [`Ok`] value, consuming the `self` value.
+    ///
+    /// 解包Result字段的Ok值，同时取出Buffer。
     #[inline(always)]
     #[track_caller]
     pub fn unwrap(self) -> (T, B) {

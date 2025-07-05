@@ -1,4 +1,5 @@
 use compio::{fs::OpenOptions, io::AsyncReadAtExt};
+use compio_io::AsyncReadAt;
 
 #[compio::main]
 async fn main() {
@@ -15,4 +16,6 @@ async fn main() {
     let buffer = String::from_utf8(buffer).unwrap();
     println!("{buffer}");
     file.close().await.unwrap();
+
+    let (read, buffer) = file.read_at(Vec::with_capacity(4096), 0).await.unwrap();
 }

@@ -8,6 +8,8 @@ const IOCP: u8 = 2;
 static DRIVER_TYPE: AtomicU8 = AtomicU8::new(UNINIT);
 
 /// Representing underlying driver type the fusion driver is using
+///
+/// 驱动类型，共三种。当前启用的驱动类型存于`DRIVER_TYPE`中。
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DriverType {
@@ -32,6 +34,8 @@ impl DriverType {
     }
 
     /// Get the underlying driver type
+    ///
+    /// 依据编译条件，获取当前应当选择的驱动。
     fn get() -> DriverType {
         cfg_if::cfg_if! {
             if #[cfg(windows)] {
@@ -57,6 +61,7 @@ impl DriverType {
                     Socket::CODE,
                 ];
 
+                // 自动探测，如果有iouring不支持的操作，则改选Poll驱动。
                 (|| {
                     let uring = io_uring::IoUring::new(2)?;
                     let mut probe = io_uring::Probe::new();
@@ -80,6 +85,8 @@ impl DriverType {
 
     /// Get the underlying driver type and cache it. Following calls will return
     /// the cached value.
+    ///
+    /// 读取当前启动的驱动类型。
     pub fn current() -> DriverType {
         match DRIVER_TYPE.load(Ordering::Acquire) {
             UNINIT => {}
@@ -93,16 +100,22 @@ impl DriverType {
     }
 
     /// Check if the current driver is `polling`
+    ///
+    /// 是否为`poll`驱动。
     pub fn is_polling() -> bool {
         Self::current() == DriverType::Poll
     }
 
     /// Check if the current driver is `io-uring`
+    ///
+    /// 是否为`iouring`驱动。
     pub fn is_iouring() -> bool {
         Self::current() == DriverType::IoUring
     }
 
     /// Check if the current driver is `iocp`
+    ///
+    /// 是否为`iocp`驱动。
     pub fn is_iocp() -> bool {
         Self::current() == DriverType::IOCP
     }

@@ -24,6 +24,7 @@ pub trait OpCode: PollOpCode + IourOpCode {}
 
 impl<T: PollOpCode + IourOpCode + ?Sized> OpCode for T {}
 
+/// 融合驱动器，包含了Poll风格和IoUring风格。
 #[allow(clippy::large_enum_variant)]
 enum FuseDriver {
     Poll(poll::Driver),
@@ -31,12 +32,16 @@ enum FuseDriver {
 }
 
 /// Low-level fusion driver.
+///
+/// 融合驱动，融合了Poll类型和IoUring类型的驱动。
 pub(crate) struct Driver {
     fuse: FuseDriver,
 }
 
 impl Driver {
     /// Create a new fusion driver with given number of entries
+    ///
+    /// 根据当前选择的驱动类型，创建驱动器。
     pub fn new(builder: &ProactorBuilder) -> io::Result<Self> {
         match DriverType::current() {
             DriverType::Poll => Ok(Self {
@@ -49,6 +54,7 @@ impl Driver {
         }
     }
 
+    /// 根据所选驱动和操作码，创建操作键。
     pub fn create_op<T: OpCode + 'static>(&self, op: T) -> Key<T> {
         match &self.fuse {
             FuseDriver::Poll(driver) => driver.create_op(op),
@@ -56,6 +62,7 @@ impl Driver {
         }
     }
 
+    /// 目前无用。
     pub fn attach(&mut self, fd: RawFd) -> io::Result<()> {
         match &mut self.fuse {
             FuseDriver::Poll(driver) => driver.attach(fd),
@@ -129,6 +136,12 @@ enum FuseNotifyHandle {
 }
 
 /// A notify handle to the inner driver.
+///
+/// 驱动器的通知句柄。让驱动器解除线程阻塞。
+///
+/// 此类型是一个融合句柄，会根据不同的驱动器选择实际的通知句柄：
+/// - Poll类型驱动器通知句柄。
+/// - IoUring类型驱动器通知句柄。
 pub struct NotifyHandle {
     fuse: FuseNotifyHandle,
 }

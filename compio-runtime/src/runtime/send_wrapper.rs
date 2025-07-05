@@ -18,6 +18,14 @@ thread_local! {
 }
 
 /// A wrapper that copied from `send_wrapper` crate, with our own optimizations.
+///
+/// 一个包装类型，值被限制在创建它的线程中可正常使用，一旦穿越了线程就变成失效。
+///
+/// 失效后的性质：
+/// - valid()，返回false。
+/// - get()，返回None。
+/// - get_unchecked()，由于不带校验，可以获取到内部值。
+/// - drop()，直接触发恐慌。
 pub struct SendWrapper<T> {
     data: ManuallyDrop<T>,
     thread_id: ThreadId,
