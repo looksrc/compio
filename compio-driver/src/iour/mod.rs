@@ -240,7 +240,6 @@ impl Driver {
     }
 
     /// 创建一个异步操作对象
-    ///
     pub fn create_op<T: crate::sys::OpCode + 'static>(&self, op: T) -> Key<T> {
         Key::new(self.as_raw_fd(), op)
     }
@@ -334,8 +333,7 @@ impl Driver {
         // 向阻塞线程池发一个任务
         self.pool
             .dispatch(move || {
-                let mut op: Key<dyn OpCode> =
-                    unsafe { Key::<dyn crate::sys::OpCode>::new_unchecked(user_data) };
+                let mut op = unsafe { Key::<dyn crate::sys::OpCode>::new_unchecked(user_data) };
                 let op_pin = op.as_op_pin();
                 let res = op_pin.call_blocking();
                 completed.push(Entry::new(user_data, res));
