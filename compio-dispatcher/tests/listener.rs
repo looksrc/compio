@@ -18,6 +18,10 @@ async fn listener_dispatch() {
         .worker_threads(NonZeroUsize::new(THREAD_NUM).unwrap())
         .build()
         .unwrap();
+
+    // 孵化一个客户端任务，任务逻辑：
+    // 1.生成一组Future：客户端连接服务端并发送"Hello World"消息。
+    // 2.顺序执行每个Future。
     let task = spawn(async move {
         let mut futures = FuturesUnordered::from_iter((0..CLIENT_NUM).map(|_| async {
             let mut cli = TcpStream::connect(&addr).await.unwrap();
@@ -25,6 +29,8 @@ async fn listener_dispatch() {
         }));
         while let Some(()) = futures.next().await {}
     });
+
+    // 服务端接收客户端连接，通过分发器执行每个连接对应的服务端代码。
     let mut handles = FuturesUnordered::new();
     for _i in 0..CLIENT_NUM {
         let (mut srv, _) = listener.accept().await.unwrap();

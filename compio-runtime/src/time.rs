@@ -1,4 +1,12 @@
 //! Utilities for tracking time.
+//! 
+//! 定时器辅助功能，提供了多种异步的定时方式：
+//! - 休眠：sleep, sleep_until
+//! - 超时：timeout, timeout_at
+//! - 周期：Interval，interval_at，通过异步的sleep_until实现。
+//! 
+//! 实现：
+//! - 通过将定时需求转化为异步等待一个时间点来实现，即TimeEntry。
 
 use std::{
     error::Error,
@@ -93,6 +101,13 @@ pub async fn timeout_at<F: Future>(deadline: Instant, future: F) -> Result<F::Ou
 /// This type allows you to wait on a sequence of instants with a certain
 /// duration between each instant. Unlike calling [`sleep`] in a loop, this lets
 /// you count the time spent between the calls to [`sleep`] as well.
+/// 
+/// 由[`interval`]和[`interval_at`]返回的周期对象。
+/// 
+/// 字段说明：
+/// - first_ticked：有没有首次触发过。
+/// - start：。
+/// - period：定时周期。首次触发过以后，
 #[derive(Debug)]
 pub struct Interval {
     first_ticked: bool,
@@ -112,6 +127,22 @@ impl Interval {
     /// Completes when the next instant in the interval has been reached.
     ///
     /// See [`interval`] and [`interval_at`].
+    /// 
+    /// 等待下一个周期激发。
+    /// 
+    /// 计算下一次激发时间：
+    /// - 正常的时间：上次激发时间 + 激发周期。
+    /// - 存在的问题：由于可能本次等待tick时，已经过去了多个激发周期，因此下一次激发时间需要考虑如何处理。
+    /// 
+    /// 正确的计算：(这里画个数轴图就明白怎么算的了)
+    /// - 计算当前时刻所在的周期段的周期进度：progress = (now - start) & period
+    /// - 计算距当前最近的上一次周期触发时刻: last = now - progress
+    /// - 计算下一次周期触发时刻：next = last + period
+    /// 
+    /// 如果触发周期已经过去了好几个，可拓展的策略：
+    /// - 立即触发，并修改原点。
+    /// - 立即出发，不重置原点。
+    /// - 下一个最近周期时刻触发，不重置原点。--(这里用的是这个策略)。
     pub async fn tick(&mut self) -> Instant {
         if !self.first_ticked {
             sleep_until(self.start).await;

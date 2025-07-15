@@ -421,6 +421,10 @@ impl Runtime {
 
     /// Low level API to control the runtime.
     ///
+    /// 运行时轮询，带超时时间：
+    /// - 轮询驱动器：更新所有操作的就绪状态，唤醒所有已继续的操作。
+    /// - 轮询定时器：更新所有定时器状态，唤醒所有已到期的定时器。
+    ///
     /// Poll the inner proactor with a custom timeout.
     pub fn poll_with(&self, timeout: Option<Duration>) {
         instrument!(compio_log::Level::DEBUG, "poll_with");

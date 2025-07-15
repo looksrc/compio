@@ -189,7 +189,8 @@ impl FdQueue {
     }
 
     /// 依据传入的事件类型(读就绪或写就绪)，
-    /// 从对应的事件队列(读队列或写队列)中弹出一个操作编号，读队列优先。
+    /// 从对应的事件队列(读队列或写队列)弹出一个正在等待事件的操作。
+    /// 优先处理读就绪。
     pub fn pop_interest(&mut self, event: &Event) -> Option<(usize, Interest)> {
         if event.readable {
             if let Some(user_data) = self.read_queue.pop_front() {
@@ -235,7 +236,7 @@ pub(crate) struct Driver {
     registry: HashMap<RawFd, FdQueue>,
     /// 阻塞线程池。用于调度执行阻塞任务。
     pool: AsyncifyPool,
-    /// 任务完结队列。可能执行完毕也可能被取消等等。
+    /// 阻塞任务完结队列。可能执行完毕也可能被取消等等。
     pool_completed: Arc<SegQueue<Entry>>,
 }
 
@@ -483,10 +484,19 @@ impl Driver {
             return Err(io::Error::from_raw_os_error(libc::ETIMEDOUT));
         }
         for event in self.events.iter() {
+            // 这里的user_data只是当时为了做event的token从某个fd的注册表中随便选的其中一个。
+            // 目的就是通过user_data恢复出操作对象，最终从操作对象中找出event对应的fd。
+            //
+            // 查找流程：
+            // user_data --> Key<dyn OpCode> --> &mut dyn OpCode --> Fd --> FdQueue ->
+            // user_data
             let user_data = event.key;
             trace!("receive {} for {:?}", user_data, event);
             let mut op = Key::<dyn crate::sys::OpCode>::new_unchecked(user_data);
             let op = op.as_op_pin();
+
+            // 网络的Op类型都是在实现OpCode时写死的Some(Fd)，为什么会出现类型为None的Op呢？
+            // 难道是RawOp被销毁后，再恢复出来的RawOp对象取类型会是None。
             match op.op_type() {
                 None => {
                     // On epoll, multiple event may be received even if it is registered as
@@ -500,6 +510,12 @@ impl Driver {
                         .registry
                         .get_mut(&fd)
                         .expect("the fd should be attached");
+
+                    // 问题：
+                    // 1.这里如果event中同时包含读和写就绪，就只处理了读就绪事件？
+                    // 那写就绪事件就不处理了？
+                    // 2.实际的读写竟然放在了驱动轮询的过程中，
+                    // 这样不会导致读写操作拖长了轮询的及时性了吗？
                     if let Some((user_data, interest)) = queue.pop_interest(&event) {
                         let mut op = Key::<dyn crate::sys::OpCode>::new_unchecked(user_data);
                         let op = op.as_op_pin();

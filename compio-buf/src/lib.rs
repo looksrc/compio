@@ -39,6 +39,8 @@ mod iter;
 pub use iter::*;
 
 /// Trait to get the inner buffer of an operation or a result.
+/// 
+/// 特质，用于获取一个操作或操作结果的内部缓冲区。
 pub trait IntoInner {
     /// The inner type.
     type Inner;

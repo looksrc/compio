@@ -35,7 +35,7 @@ impl DriverType {
 
     /// Get the underlying driver type
     ///
-    /// 依据编译条件，获取当前应当选择的驱动。
+    /// 依据编译条件，获取项目级、平台级指定的驱动。
     fn get() -> DriverType {
         cfg_if::cfg_if! {
             if #[cfg(windows)] {
@@ -86,7 +86,7 @@ impl DriverType {
     /// Get the underlying driver type and cache it. Following calls will return
     /// the cached value.
     ///
-    /// 读取当前启动的驱动类型。
+    /// 读取项目级、平台级指定的驱动并设置给。
     pub fn current() -> DriverType {
         match DRIVER_TYPE.load(Ordering::Acquire) {
             UNINIT => {}

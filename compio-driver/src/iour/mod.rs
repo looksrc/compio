@@ -217,6 +217,12 @@ impl Driver {
     /// 返回值：
     /// - true：CQ非空，本轮轮询到了CQ任务。
     /// - false：CQ为空，本轮没有轮询到CQ任务。
+    ///
+    /// CQE分类：
+    /// - CANCEL：取消操作的CQE，不需要后续处理。
+    /// - NOTIFY：通知线程解除阻塞的的CQE，即eventfd的read操作完成，
+    ///   还原eventfd状态。
+    /// - 其它：将操作结果设置给RawOp，并唤醒Op所在的任务。
     fn poll_entries(&mut self) -> bool {
         self.poll_blocking();
 

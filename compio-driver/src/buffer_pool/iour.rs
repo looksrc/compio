@@ -14,7 +14,7 @@ use io_uring_buf_ring::IoUringBufRing;
 
 /// Buffer pool
 ///
-/// 缓冲池，实际是IoUring中注册的环形缓冲池。
+/// 缓冲池，实际是IoUring中注册的环形缓冲池，套壳io_uring_buf_ring库。
 /// - 通过buf_group引用缓冲池。
 /// - 通过sqe中的buffer_select(cqe.flags)计算出所使用的缓冲块在池中的索引。
 ///
@@ -47,6 +47,8 @@ impl BufferPool {
     }
 
     /// 根据cqe的flags取出本次操作使用的缓冲块。
+    /// - 1.根据buffer_select + flags，计算出buffer_id。
+    /// - 2.通过get_buf + buffer_id，取得缓存块的借用。
     ///
     /// ## Safety
     /// * `available_len` should be the returned value from the op.
@@ -68,7 +70,7 @@ impl BufferPool {
             .ok_or_else(|| io::Error::other(format!("cannot find buffer {buffer_id}")))
     }
 
-    /// 释放一个缓冲块，以备复用。
+    /// ???
     pub(crate) fn reuse_buffer(&self, flags: u32) {
         // It ignores invalid flags.
         if let Some(buffer_id) = buffer_select(flags) {

@@ -31,6 +31,13 @@ impl BufferPoolInner {
 ///
 /// A buffer pool to allow user no need to specify a specific buffer to do the
 /// IO operation
+///
+/// 缓冲池。用于非iouring驱动的操作。
+///
+/// 实现：
+/// - 通过队列实现环形缓冲区。
+/// - 使用时从队列弹出，所有权移交给使用者。
+/// - 使用后压回队列尾部，所有权又回来了。
 pub struct BufferPool {
     inner: Rc<BufferPoolInner>,
 }
@@ -42,6 +49,9 @@ impl Debug for BufferPool {
 }
 
 impl BufferPool {
+    /// 创建缓冲池
+    /// - 指定了缓冲块大小，以及缓冲块总数。
+    /// - 缓冲池使用引用计数，内部可变。
     pub(crate) fn new(buffer_len: u16, buffer_size: usize) -> Self {
         // To match the behavior of io-uring, extend the number of buffers.
         let buffers = (0..buffer_len.next_power_of_two())
@@ -56,6 +66,9 @@ impl BufferPool {
     }
 
     /// Select an [`OwnedBuffer`] when the op creates.
+    ///
+    /// 弹出一个缓冲块，获取其所有权，按长度要求和容量对其进行修正，
+    /// 取两者最小值。
     #[doc(hidden)]
     pub fn get_buffer(&self, len: usize) -> io::Result<OwnedBuffer> {
         let buffer = self
@@ -73,10 +86,13 @@ impl BufferPool {
     }
 
     /// Return the buffer to the pool.
+    ///
+    /// 添加一个缓冲块。
     pub(crate) fn add_buffer(&self, buffer: Vec<u8>) {
         self.inner.add_buffer(buffer);
     }
 
+    /// 将具有所有权的缓冲块，转为借用缓冲块，同时按需求修正其长度。
     /// ## Safety
     /// * `len` should be valid.
     #[doc(hidden)]
@@ -88,6 +104,11 @@ impl BufferPool {
     }
 }
 
+/// 持有缓冲块所有权，缓冲池的引用计数。
+///
+/// drop逻辑：
+/// - 缓冲坏还回缓冲池。
+/// - 缓冲池减少引用计数。
 #[doc(hidden)]
 pub struct OwnedBuffer {
     buffer: ManuallyDrop<Slice<Vec<u8>>>,
@@ -157,6 +178,11 @@ impl IntoInner for OwnedBuffer {
 ///
 /// When IO operation finish, user will obtain a `BorrowedBuffer` to access the
 /// filled data
+///
+/// 缓冲块借用，持有缓冲块的所有权，持有缓冲池的只读引用
+///
+/// drop逻辑：
+/// - 将缓冲块换回缓冲池。
 pub struct BorrowedBuffer<'a> {
     buffer: ManuallyDrop<Slice<Vec<u8>>>,
     pool: &'a BufferPool,
